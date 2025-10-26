@@ -134,7 +134,7 @@ def _prepare_rank_table(df: pd.DataFrame, top_n: int, ascending: bool, min_base:
         "NPATMI YoY %",
     ]
 
-    return table[display_columns]
+    return table[display_columns]ß
 
 
 def main() -> None:
@@ -154,11 +154,11 @@ def main() -> None:
     col_controls = st.columns(2)
     with col_controls[0]:
         min_base_bn = st.number_input(
-            "Minimum earnings base (bn VND)",
+            "Minimum revenue base (bn VND)",
             min_value=0.0,
             value=200.0,
             step=50.0,
-            help="Only tickers with current-period earnings above this threshold are ranked."
+            help="Only tickers with current-period revenue above this threshold are ranked."
         )
     with col_controls[1]:
         top_n = st.slider(
