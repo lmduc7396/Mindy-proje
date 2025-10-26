@@ -79,18 +79,30 @@ def _format_display(df: pd.DataFrame, sector_column: str) -> pd.DataFrame:
     earnings_metrics = metric_labels()
     for metric in earnings_metrics:
         if metric in formatted.columns:
-            metric_values = pd.to_numeric(formatted[metric], errors="coerce")
+            metric_series = formatted[metric]
+            if metric_series.dtype == object:
+                metric_series = metric_series.astype(str).str.replace(",", "", regex=False)
+            metric_values = pd.to_numeric(metric_series, errors="coerce")
             formatted[metric] = metric_values / 1e9
 
         qoq_col = f"{metric}_QoQ"
         yoy_col = f"{metric}_YoY"
         if qoq_col in formatted.columns:
-            formatted[qoq_col] = pd.to_numeric(formatted[qoq_col], errors="coerce") * 100
+            qoq_series = formatted[qoq_col]
+            if qoq_series.dtype == object:
+                qoq_series = qoq_series.astype(str).str.replace("%", "", regex=False)
+            formatted[qoq_col] = pd.to_numeric(qoq_series, errors="coerce") * 100
         if yoy_col in formatted.columns:
-            formatted[yoy_col] = pd.to_numeric(formatted[yoy_col], errors="coerce") * 100
+            yoy_series = formatted[yoy_col]
+            if yoy_series.dtype == object:
+                yoy_series = yoy_series.astype(str).str.replace("%", "", regex=False)
+            formatted[yoy_col] = pd.to_numeric(yoy_series, errors="coerce") * 100
 
     if "coverage_pct" in formatted.columns:
-        formatted["coverage_pct"] = pd.to_numeric(formatted["coverage_pct"], errors="coerce") * 100
+        coverage_series = formatted["coverage_pct"]
+        if coverage_series.dtype == object:
+            coverage_series = coverage_series.astype(str).str.replace("%", "", regex=False)
+        formatted["coverage_pct"] = pd.to_numeric(coverage_series, errors="coerce") * 100
 
     column_order: List[str] = [sector_column, "released_companies", "total_companies", "coverage_pct"]
     for metric in earnings_metrics:
