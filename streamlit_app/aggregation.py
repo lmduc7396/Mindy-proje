@@ -152,6 +152,8 @@ def _pivot_financials(raw_df: pd.DataFrame) -> pd.DataFrame:
         if label not in pivoted.columns:
             pivoted[label] = np.nan
 
+    pivoted[metric_labels()] = pivoted[metric_labels()].apply(pd.to_numeric, errors="coerce")
+
     return pivoted
 
 
@@ -182,6 +184,7 @@ def _aggregate_period(
         .sum(min_count=1)
         .reset_index()
     )
+    aggregated[metric_cols] = aggregated[metric_cols].apply(pd.to_numeric, errors="coerce")
     return aggregated
 
 
@@ -259,6 +262,7 @@ def summarise_by_sector(
         .sum(min_count=1)
         .reset_index()
     )
+    current_summary[metric_cols] = current_summary[metric_cols].apply(pd.to_numeric, errors="coerce")
 
     counts = (
         released_df
@@ -280,6 +284,8 @@ def summarise_by_sector(
         metric_cols,
         released_tickers,
     )
+    if not previous_summary.empty:
+        previous_summary[metric_cols] = previous_summary[metric_cols].apply(pd.to_numeric, errors="coerce")
 
     yoy_summary = _aggregate_period(
         pivoted,
@@ -288,6 +294,8 @@ def summarise_by_sector(
         metric_cols,
         released_tickers,
     )
+    if not yoy_summary.empty:
+        yoy_summary[metric_cols] = yoy_summary[metric_cols].apply(pd.to_numeric, errors="coerce")
 
     qoq_growth = _compute_growth(current_summary, previous_summary, sector_column, metric_cols, "QoQ")
     yoy_growth = _compute_growth(current_summary, yoy_summary, sector_column, metric_cols, "YoY")
