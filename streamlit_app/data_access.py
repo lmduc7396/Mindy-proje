@@ -4,34 +4,62 @@ from __future__ import annotations
 
 import os
 from functools import lru_cache
-from typing import Iterable, Sequence
+from typing import Iterable, Optional, Sequence
 
 import pandas as pd
 from sqlalchemy import bindparam, create_engine, text
 from sqlalchemy.engine import Engine
+
+try:  # Streamlit may not be installed in non-app contexts
+    import streamlit as st  # type: ignore
+except ModuleNotFoundError:  # pragma: no cover - optional dependency
+    st = None  # type: ignore
+
+from urllib.parse import quote_plus
 
 
 class MissingDatabaseURL(RuntimeError):
     """Raised when the required DATABASE_URL environment variable is absent."""
 
 
+def _standardise_sqlalchemy_url(raw_value: str) -> str:
+    """Convert raw connection strings into a SQLAlchemy-compatible URL."""
+
+    if raw_value.startswith("mssql+"):
+        return raw_value
+
+    # Assume the value is an ODBC connection string
+    return f"mssql+pyodbc:///?odbc_connect={quote_plus(raw_value)}"
+
+
 def _get_database_url() -> str:
-    """Return the database URL from environment variables.
+    """Return the database URL from environment variables or Streamlit secrets."""
 
-    Raises
-    ------
-    MissingDatabaseURL
-        If the DATABASE_URL variable has not been configured.
-    """
+    candidates = [
+        os.getenv("DATABASE_URL"),
+        os.getenv("SOURCE_DB_CONNECTION_STRING"),
+    ]
 
-    db_url = os.getenv("DATABASE_URL")
-    if not db_url:
-        raise MissingDatabaseURL(
-            "DATABASE_URL environment variable is not set. "
-            "Configure it with your database connection string (e.g. "
-            "mssql+pyodbc://user:pass@server/database?driver=ODBC+Driver+17+for+SQL+Server)."
+    if st is not None:
+        secret_value: Optional[str] = st.secrets.get("DATABASE_URL") if "DATABASE_URL" in st.secrets else None
+        if secret_value:
+            candidates.insert(0, secret_value)
+        secret_odbc: Optional[str] = (
+            st.secrets.get("SOURCE_DB_CONNECTION_STRING")
+            if "SOURCE_DB_CONNECTION_STRING" in st.secrets
+            else None
         )
-    return db_url
+        if secret_odbc:
+            candidates.append(secret_odbc)
+
+    for candidate in candidates:
+        if candidate:
+            return _standardise_sqlalchemy_url(candidate)
+
+    raise MissingDatabaseURL(
+        "No database connection string configured. Set DATABASE_URL (SQLAlchemy style) or "
+        "SOURCE_DB_CONNECTION_STRING (ODBC style) via environment variables or Streamlit secrets."
+    )
 
 
 @lru_cache(maxsize=1)
