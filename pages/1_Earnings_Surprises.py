@@ -100,7 +100,7 @@ def _prepare_rank_table(df: pd.DataFrame, top_n: int, ascending: bool, min_base:
     revenue_df["Revenue QoQ %"] = revenue_df["Revenue QoQ %"] * 100
     revenue_df["Revenue YoY %"] = revenue_df["Revenue YoY %"] * 100
 
-    npatmi_df = filtered[npasmi_mask][["Ticker", "Sector", "L2", "current_value", "qoq_growth", "yoy_growth"]]
+    npatmi_df = filtered[npatmi_mask][["Ticker", "Sector", "L2", "current_value", "qoq_growth", "yoy_growth"]]
     npatmi_df = npatmi_df.rename(
         columns={
             "current_value": "NPATMI (bn VND)",
