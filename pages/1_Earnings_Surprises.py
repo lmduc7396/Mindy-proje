@@ -85,53 +85,40 @@ def _prepare_rank_table(df: pd.DataFrame, top_n: int, ascending: bool, min_base:
         ascending=[ascending, False, False],
     ).head(top_n)
 
-    filtered["Revenue (bn VND)"] = np.where(
-        filtered["Metric"] == "Revenue",
-        filtered["current_value"] / 1e9,
-        np.nan,
+    revenue_mask = filtered["Metric"] == "Revenue"
+    npatmi_mask = filtered["Metric"] == "NPATMI"
+
+    revenue_df = filtered[revenue_mask][["Ticker", "Sector", "L2", "current_value", "qoq_growth", "yoy_growth"]]
+    revenue_df = revenue_df.rename(
+        columns={
+            "current_value": "Revenue (bn VND)",
+            "qoq_growth": "Revenue QoQ %",
+            "yoy_growth": "Revenue YoY %",
+        }
     )
-    filtered["Revenue QoQ %"] = np.where(
-        filtered["Metric"] == "Revenue",
-        filtered["qoq_growth"] * 100,
-        np.nan,
+    revenue_df["Revenue (bn VND)"] = revenue_df["Revenue (bn VND)"] / 1e9
+    revenue_df["Revenue QoQ %"] = revenue_df["Revenue QoQ %"] * 100
+    revenue_df["Revenue YoY %"] = revenue_df["Revenue YoY %"] * 100
+
+    npatmi_df = filtered[npasmi_mask][["Ticker", "Sector", "L2", "current_value", "qoq_growth", "yoy_growth"]]
+    npatmi_df = npatmi_df.rename(
+        columns={
+            "current_value": "NPATMI (bn VND)",
+            "qoq_growth": "NPATMI QoQ %",
+            "yoy_growth": "NPATMI YoY %",
+        }
     )
-    filtered["Revenue YoY %"] = np.where(
-        filtered["Metric"] == "Revenue",
-        filtered["yoy_growth"] * 100,
-        np.nan,
-    )
-    filtered["NPATMI (bn VND)"] = np.where(
-        filtered["Metric"] == "NPATMI",
-        filtered["current_value"] / 1e9,
-        np.nan,
-    )
-    filtered["NPATMI QoQ %"] = np.where(
-        filtered["Metric"] == "NPATMI",
-        filtered["qoq_growth"] * 100,
-        np.nan,
-    )
-    filtered["NPATMI YoY %"] = np.where(
-        filtered["Metric"] == "NPATMI",
-        filtered["yoy_growth"] * 100,
-        np.nan,
+    npatmi_df["NPATMI (bn VND)"] = npatmi_df["NPATMI (bn VND)"] / 1e9
+    npatmi_df["NPATMI QoQ %"] = npatmi_df["NPATMI QoQ %"] * 100
+    npatmi_df["NPATMI YoY %"] = npatmi_df["NPATMI YoY %"] * 100
+
+    combined = revenue_df.merge(
+        npatmi_df,
+        on=["Ticker", "Sector", "L2"],
+        how="outer",
     )
 
-    aggregated = (
-        filtered.groupby(["Ticker", "Sector", "L2"], dropna=False)[
-            [
-                "Revenue (bn VND)",
-                "Revenue QoQ %",
-                "Revenue YoY %",
-                "NPATMI (bn VND)",
-                "NPATMI QoQ %",
-                "NPATMI YoY %",
-            ]
-        ]
-        .sum(min_count=1)
-        .reset_index()
-    )
-
-    return aggregated
+    return combined
 
 
 def main() -> None:
