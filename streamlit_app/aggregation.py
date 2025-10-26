@@ -204,14 +204,27 @@ def _compute_growth(
         comparison = comparison.reindex(current.index)
 
     for metric in metric_cols:
-        current_series = pd.to_numeric(current.get(metric), errors="coerce")
+        if metric in current.columns:
+            current_series = pd.to_numeric(current[metric], errors="coerce")
+        else:
+            current_series = pd.Series(np.nan, index=current.index, dtype=float)
+
         if comparison is None:
             growth[metric] = np.nan
             continue
 
-        comparison_series = pd.to_numeric(comparison.get(metric), errors="coerce")
+        if metric in comparison.columns:
+            comparison_series = pd.to_numeric(comparison[metric], errors="coerce")
+        else:
+            comparison_series = pd.Series(np.nan, index=current.index, dtype=float)
+
+        diff_values = (current_series - comparison_series).to_numpy(dtype=float)
+        comparison_values = comparison_series.to_numpy(dtype=float)
+        mask = ~np.isnan(comparison_values) & (comparison_values != 0)
+        result = np.full_like(diff_values, np.nan, dtype=float)
         with np.errstate(divide="ignore", invalid="ignore"):
-            growth[metric] = (current_series - comparison_series) / comparison_series
+            result[mask] = diff_values[mask] / comparison_values[mask]
+        growth[metric] = result
 
     growth = growth.replace([np.inf, -np.inf], np.nan)
     growth = growth.rename(columns={col: f"{col}_{suffix}" for col in metric_cols})
