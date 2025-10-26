@@ -17,9 +17,40 @@ except ModuleNotFoundError:  # pragma: no cover - optional dependency
 
 from urllib.parse import quote_plus
 
+try:
+    import pyodbc  # type: ignore
+except ModuleNotFoundError:  # pragma: no cover - optional dependency
+    pyodbc = None  # type: ignore
+
 
 class MissingDatabaseURL(RuntimeError):
     """Raised when the required DATABASE_URL environment variable is absent."""
+
+
+def _maybe_replace_driver(connection_string: str) -> str:
+    """Replace ODBC driver name if the requested one is unavailable."""
+
+    if pyodbc is None:
+        return connection_string
+
+    try:
+        available_drivers = {driver.lower() for driver in pyodbc.drivers()}
+    except Exception:  # pragma: no cover - defensive
+        return connection_string
+
+    # Normalize spacing to match driver list formatting
+    requested_driver = None
+    if "{ODBC Driver 18 for SQL Server}" in connection_string:
+        requested_driver = "odbc driver 18 for sql server"
+    elif "{ODBC Driver 17 for SQL Server}" in connection_string:
+        requested_driver = "odbc driver 17 for sql server"
+
+    if requested_driver and requested_driver not in available_drivers:
+        fallback = "{ODBC Driver 17 for SQL Server}" if "odbc driver 17 for sql server" in available_drivers else None
+        if fallback:
+            return connection_string.replace("{ODBC Driver 18 for SQL Server}", fallback)
+
+    return connection_string
 
 
 def _standardise_sqlalchemy_url(raw_value: str) -> str:
@@ -29,7 +60,8 @@ def _standardise_sqlalchemy_url(raw_value: str) -> str:
         return raw_value
 
     # Assume the value is an ODBC connection string
-    return f"mssql+pyodbc:///?odbc_connect={quote_plus(raw_value)}"
+    adjusted = _maybe_replace_driver(raw_value)
+    return f"mssql+pyodbc:///?odbc_connect={quote_plus(adjusted)}"
 
 
 def _get_database_url() -> str:
