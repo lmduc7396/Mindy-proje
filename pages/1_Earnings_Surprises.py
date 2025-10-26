@@ -90,6 +90,7 @@ def _prepare_rank_table(df: pd.DataFrame, top_n: int, ascending: bool, min_base:
     filtered["YoY Growth %"] = filtered["yoy_growth"] * 100
 
     display_columns = [
+        "Metric",
         "Ticker",
         "Sector",
         "L2",
@@ -148,8 +149,6 @@ def main() -> None:
 
     min_base_value = min_base_bn * 1e9
 
-    metrics = metric_labels()
-
     def _display_table(title: str, df: pd.DataFrame) -> None:
         st.subheader(title)
         if df.empty:
@@ -167,9 +166,10 @@ def main() -> None:
             column_config={k: v for k, v in column_config.items() if k in df.columns},
         )
 
-    for metric in metrics:
-        st.markdown(f"### {metric} Surprises")
+    metrics = metric_labels()
+    growth_frames: list[pd.DataFrame] = []
 
+    for metric in metrics:
         growth_df = _compute_ticker_growth(
             pivoted,
             metric=metric,
@@ -179,17 +179,26 @@ def main() -> None:
         )
 
         if growth_df.empty:
-            st.write("No tickers with available data for this metric.")
             continue
 
-        best = _prepare_rank_table(growth_df, top_n, ascending=False, min_base=min_base_value)
-        worst = _prepare_rank_table(growth_df, top_n, ascending=True, min_base=min_base_value)
+        growth_df = growth_df.copy()
+        growth_df["Metric"] = metric
+        growth_frames.append(growth_df)
 
-        cols = st.columns(2)
-        with cols[0]:
-            _display_table("Top Combined Growth", best)
-        with cols[1]:
-            _display_table("Worst Combined Growth", worst)
+    if not growth_frames:
+        st.info("No tickers with available growth data for the selected configuration.")
+        return
+
+    combined_growth = pd.concat(growth_frames, ignore_index=True)
+
+    best = _prepare_rank_table(combined_growth, top_n, ascending=False, min_base=min_base_value)
+    worst = _prepare_rank_table(combined_growth, top_n, ascending=True, min_base=min_base_value)
+
+    cols = st.columns(2)
+    with cols[0]:
+        _display_table("Positive Surprises", best)
+    with cols[1]:
+        _display_table("Negative Surprises", worst)
 
     st.caption(
         "Combined ranking averages percentile ranks for QoQ and YoY growth, then orders tickers by score and earnings base."
