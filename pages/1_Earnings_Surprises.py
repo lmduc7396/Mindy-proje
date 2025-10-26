@@ -64,7 +64,7 @@ def _compute_ticker_growth(
 
     current["qoq_rank"] = current["qoq_growth"].rank(ascending=True, method="average", pct=True)
     current["yoy_rank"] = current["yoy_growth"].rank(ascending=True, method="average", pct=True)
-    current["combined_score"] = np.nanmean(current[["qoq_rank", "yoy_rank"]].to_numpy(), axis=1)
+    current["metric_score"] = np.nanmean(current[["qoq_rank", "yoy_rank"]].to_numpy(), axis=1)
 
     return current
 
@@ -73,52 +73,55 @@ def _prepare_rank_table(df: pd.DataFrame, top_n: int, ascending: bool, min_base:
     if df.empty:
         return pd.DataFrame()
 
-    filtered = df.copy()
-    filtered["abs_base"] = filtered["current_value"].abs()
-    filtered = filtered[filtered["abs_base"] >= min_base]
-    filtered = filtered[filtered["combined_score"].notna()]
-    if filtered.empty:
+    table = df.copy()
+    table = table[table["base_value"].notna()]
+    table = table[table["base_value"] >= min_base]
+    table = table[table["combined_score"].notna()]
+    if table.empty:
         return pd.DataFrame()
 
-    filtered = filtered.sort_values(
-        by=["combined_score", "abs_base", "current_value"],
-        ascending=[ascending, False, False],
+    sort_columns = ["combined_score", "base_value", "Revenue_current", "NPATMI_current"]
+    ascending_flags = [ascending, False, False, False]
+    existing_columns = [col for col in sort_columns if col in table.columns]
+    existing_flags = ascending_flags[: len(existing_columns)]
+
+    table = table.sort_values(
+        by=existing_columns,
+        ascending=existing_flags,
+        kind="mergesort",
     ).head(top_n)
 
-    revenue_mask = filtered["Metric"] == "Revenue"
-    npatmi_mask = filtered["Metric"] == "NPATMI"
+    if "Revenue_current" in table.columns:
+        table["Revenue (bn VND)"] = table["Revenue_current"] / 1e9
+        table["Revenue QoQ %"] = table["Revenue_qoq"] * 100
+        table["Revenue YoY %"] = table["Revenue_yoy"] * 100
+    else:
+        table["Revenue (bn VND)"] = np.nan
+        table["Revenue QoQ %"] = np.nan
+        table["Revenue YoY %"] = np.nan
 
-    revenue_df = filtered[revenue_mask][["Ticker", "Sector", "L2", "current_value", "qoq_growth", "yoy_growth"]]
-    revenue_df = revenue_df.rename(
-        columns={
-            "current_value": "Revenue (bn VND)",
-            "qoq_growth": "Revenue QoQ %",
-            "yoy_growth": "Revenue YoY %",
-        }
-    )
-    revenue_df["Revenue (bn VND)"] = revenue_df["Revenue (bn VND)"] / 1e9
-    revenue_df["Revenue QoQ %"] = revenue_df["Revenue QoQ %"] * 100
-    revenue_df["Revenue YoY %"] = revenue_df["Revenue YoY %"] * 100
+    if "NPATMI_current" in table.columns:
+        table["NPATMI (bn VND)"] = table["NPATMI_current"] / 1e9
+        table["NPATMI QoQ %"] = table["NPATMI_qoq"] * 100
+        table["NPATMI YoY %"] = table["NPATMI_yoy"] * 100
+    else:
+        table["NPATMI (bn VND)"] = np.nan
+        table["NPATMI QoQ %"] = np.nan
+        table["NPATMI YoY %"] = np.nan
 
-    npatmi_df = filtered[npatmi_mask][["Ticker", "Sector", "L2", "current_value", "qoq_growth", "yoy_growth"]]
-    npatmi_df = npatmi_df.rename(
-        columns={
-            "current_value": "NPATMI (bn VND)",
-            "qoq_growth": "NPATMI QoQ %",
-            "yoy_growth": "NPATMI YoY %",
-        }
-    )
-    npatmi_df["NPATMI (bn VND)"] = npatmi_df["NPATMI (bn VND)"] / 1e9
-    npatmi_df["NPATMI QoQ %"] = npatmi_df["NPATMI QoQ %"] * 100
-    npatmi_df["NPATMI YoY %"] = npatmi_df["NPATMI YoY %"] * 100
+    display_columns = [
+        "Ticker",
+        "Sector",
+        "L2",
+        "Revenue (bn VND)",
+        "Revenue QoQ %",
+        "Revenue YoY %",
+        "NPATMI (bn VND)",
+        "NPATMI QoQ %",
+        "NPATMI YoY %",
+    ]
 
-    combined = revenue_df.merge(
-        npatmi_df,
-        on=["Ticker", "Sector", "L2"],
-        how="outer",
-    )
-
-    return combined
+    return table[display_columns]
 
 
 def main() -> None:
@@ -190,7 +193,7 @@ def main() -> None:
         )
 
     metrics = metric_labels()
-    growth_frames: list[pd.DataFrame] = []
+    metric_frames: list[pd.DataFrame] = []
 
     for metric in metrics:
         growth_df = _compute_ticker_growth(
@@ -204,15 +207,57 @@ def main() -> None:
         if growth_df.empty:
             continue
 
-        growth_df = growth_df.copy()
-        growth_df["Metric"] = metric
-        growth_frames.append(growth_df)
+        prefix = metric.upper().replace(" ", "_")
+        renamed = growth_df.rename(
+            columns={
+                "current_value": f"{prefix}_current",
+                "qoq_growth": f"{prefix}_qoq",
+                "yoy_growth": f"{prefix}_yoy",
+                "metric_score": f"{prefix}_score",
+            }
+        )
+        renamed = renamed[
+            ["Ticker", f"{prefix}_current", f"{prefix}_qoq", f"{prefix}_yoy", f"{prefix}_score"]
+        ]
+        renamed = renamed.set_index("Ticker")
+        metric_frames.append(renamed)
 
-    if not growth_frames:
+    if not metric_frames:
         st.info("No tickers with available growth data for the selected configuration.")
         return
 
-    combined_growth = pd.concat(growth_frames, ignore_index=True)
+    combined_growth = pd.concat(metric_frames, axis=1, join="outer")
+    combined_growth = combined_growth.reset_index()
+
+    sector_info = sector_map[["Ticker", "Sector", "L2"]].drop_duplicates()
+    combined_growth = combined_growth.merge(sector_info, on="Ticker", how="left")
+
+    score_columns = [col for col in combined_growth.columns if col.endswith("_score")]
+    if score_columns:
+        combined_growth["combined_score"] = combined_growth[score_columns].mean(axis=1, skipna=True)
+    else:
+        combined_growth["combined_score"] = np.nan
+
+    value_columns = [col for col in combined_growth.columns if col.endswith("_current")]
+    if value_columns:
+        combined_growth["base_value"] = combined_growth[value_columns].abs().max(axis=1, skipna=True)
+    else:
+        combined_growth["base_value"] = np.nan
+
+    combined_growth = combined_growth.dropna(subset=value_columns, how="all")
+
+    # Normalize column names for downstream display
+    rename_map = {
+        "REVENUE_current": "Revenue_current",
+        "REVENUE_qoq": "Revenue_qoq",
+        "REVENUE_yoy": "Revenue_yoy",
+        "REVENUE_score": "Revenue_score",
+        "NPATMI_current": "NPATMI_current",
+        "NPATMI_qoq": "NPATMI_qoq",
+        "NPATMI_yoy": "NPATMI_yoy",
+        "NPATMI_score": "NPATMI_score",
+    }
+    combined_growth = combined_growth.rename(columns=rename_map)
 
     best = _prepare_rank_table(combined_growth, top_n, ascending=False, min_base=min_base_value)
     worst = _prepare_rank_table(combined_growth, top_n, ascending=True, min_base=min_base_value)
