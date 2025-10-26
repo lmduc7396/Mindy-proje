@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import os
+import logging
 from functools import lru_cache
-from typing import Iterable, Optional, Sequence
+from typing import Iterable, List, Optional, Sequence
 
 import pandas as pd
 from sqlalchemy import bindparam, create_engine, text
@@ -17,40 +18,9 @@ except ModuleNotFoundError:  # pragma: no cover - optional dependency
 
 from urllib.parse import quote_plus
 
-try:
-    import pyodbc  # type: ignore
-except ModuleNotFoundError:  # pragma: no cover - optional dependency
-    pyodbc = None  # type: ignore
-
 
 class MissingDatabaseURL(RuntimeError):
     """Raised when the required DATABASE_URL environment variable is absent."""
-
-
-def _maybe_replace_driver(connection_string: str) -> str:
-    """Replace ODBC driver name if the requested one is unavailable."""
-
-    if pyodbc is None:
-        return connection_string
-
-    try:
-        available_drivers = {driver.lower() for driver in pyodbc.drivers()}
-    except Exception:  # pragma: no cover - defensive
-        return connection_string
-
-    # Normalize spacing to match driver list formatting
-    requested_driver = None
-    if "{ODBC Driver 18 for SQL Server}" in connection_string:
-        requested_driver = "odbc driver 18 for sql server"
-    elif "{ODBC Driver 17 for SQL Server}" in connection_string:
-        requested_driver = "odbc driver 17 for sql server"
-
-    if requested_driver and requested_driver not in available_drivers:
-        fallback = "{ODBC Driver 17 for SQL Server}" if "odbc driver 17 for sql server" in available_drivers else None
-        if fallback:
-            return connection_string.replace("{ODBC Driver 18 for SQL Server}", fallback)
-
-    return connection_string
 
 
 def _standardise_sqlalchemy_url(raw_value: str) -> str:
@@ -60,45 +30,91 @@ def _standardise_sqlalchemy_url(raw_value: str) -> str:
         return raw_value
 
     # Assume the value is an ODBC connection string
-    adjusted = _maybe_replace_driver(raw_value)
-    return f"mssql+pyodbc:///?odbc_connect={quote_plus(adjusted)}"
+    return f"mssql+pyodbc:///?odbc_connect={quote_plus(raw_value)}"
 
 
-def _get_database_url() -> str:
-    """Return the database URL from environment variables or Streamlit secrets."""
+def _enumerate_secret_values() -> List[str]:
+    candidates: List[str] = []
 
-    candidates = [
+    env_candidates = [
         os.getenv("DATABASE_URL"),
         os.getenv("SOURCE_DB_CONNECTION_STRING"),
     ]
+    candidates.extend([value for value in env_candidates if value])
 
     if st is not None:
-        secret_value: Optional[str] = st.secrets.get("DATABASE_URL") if "DATABASE_URL" in st.secrets else None
-        if secret_value:
-            candidates.insert(0, secret_value)
-        secret_odbc: Optional[str] = (
-            st.secrets.get("SOURCE_DB_CONNECTION_STRING")
-            if "SOURCE_DB_CONNECTION_STRING" in st.secrets
-            else None
+        for key in ("DATABASE_URL", "SOURCE_DB_CONNECTION_STRING"):
+            try:
+                value = st.secrets[key]
+            except Exception:  # pragma: no cover - secrets missing
+                continue
+            if value and value not in candidates:
+                candidates.insert(0, value)
+
+    return candidates
+
+
+def _augment_with_driver_fallbacks(raw_value: str) -> List[str]:
+    options = [raw_value]
+
+    if "{ODBC Driver 18 for SQL Server}" in raw_value and "{ODBC Driver 17 for SQL Server}" not in raw_value:
+        options.append(raw_value.replace("{ODBC Driver 18 for SQL Server}", "{ODBC Driver 17 for SQL Server}"))
+
+    return options
+
+
+def _get_candidate_database_urls() -> List[str]:
+    raw_candidates = _enumerate_secret_values()
+    if not raw_candidates:
+        raise MissingDatabaseURL(
+            "No database connection string configured. Set DATABASE_URL (SQLAlchemy format) or "
+            "SOURCE_DB_CONNECTION_STRING (ODBC format) via environment variables or Streamlit secrets."
         )
-        if secret_odbc:
-            candidates.append(secret_odbc)
 
-    for candidate in candidates:
-        if candidate:
-            return _standardise_sqlalchemy_url(candidate)
+    urls: List[str] = []
+    for raw in raw_candidates:
+        raw = raw.strip()
+        if not raw:
+            continue
+        for option in _augment_with_driver_fallbacks(raw):
+            url = _standardise_sqlalchemy_url(option)
+            if url not in urls:
+                urls.append(url)
+    return urls
 
-    raise MissingDatabaseURL(
-        "No database connection string configured. Set DATABASE_URL (SQLAlchemy style) or "
-        "SOURCE_DB_CONNECTION_STRING (ODBC style) via environment variables or Streamlit secrets."
-    )
+logger = logging.getLogger(__name__)
 
 
 @lru_cache(maxsize=1)
 def get_engine() -> Engine:
-    """Create (or return cached) SQLAlchemy engine for the configured database."""
+    """Create (or return cached) SQLAlchemy engine for the configured database.
 
-    return create_engine(_get_database_url())
+    Attempts multiple connection strings (including driver fallbacks) until a
+    connection succeeds. Raises the last encountered exception if all attempts
+    fail.
+    """
+
+    candidate_urls = _get_candidate_database_urls()
+    last_error: Optional[Exception] = None
+
+    for url in candidate_urls:
+        engine = create_engine(url)
+        try:
+            with engine.connect() as connection:
+                connection.execute(text("SELECT 1"))
+            logger.info("Connected to database using %s", url)
+            return engine
+        except Exception as err:  # pragma: no cover - relies on external DB
+            last_error = err
+            engine.dispose()
+            logger.warning("Connection attempt failed for %s: %s", url, err)
+            continue
+
+    if last_error:
+        raise last_error
+
+    # Should not reach here because MissingDatabaseURL already raised when no candidates
+    raise MissingDatabaseURL("Unable to establish database connection with provided configuration.")
 
 
 def fetch_sector_map(engine: Engine | None = None) -> pd.DataFrame:
