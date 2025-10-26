@@ -79,17 +79,18 @@ def _format_display(df: pd.DataFrame, sector_column: str) -> pd.DataFrame:
     earnings_metrics = metric_labels()
     for metric in earnings_metrics:
         if metric in formatted.columns:
-            formatted[metric] = formatted[metric] / 1e9
+            metric_values = pd.to_numeric(formatted[metric], errors="coerce")
+            formatted[metric] = metric_values / 1e9
 
         qoq_col = f"{metric}_QoQ"
         yoy_col = f"{metric}_YoY"
         if qoq_col in formatted.columns:
-            formatted[qoq_col] = formatted[qoq_col] * 100
+            formatted[qoq_col] = pd.to_numeric(formatted[qoq_col], errors="coerce") * 100
         if yoy_col in formatted.columns:
-            formatted[yoy_col] = formatted[yoy_col] * 100
+            formatted[yoy_col] = pd.to_numeric(formatted[yoy_col], errors="coerce") * 100
 
     if "coverage_pct" in formatted.columns:
-        formatted["coverage_pct"] = formatted["coverage_pct"] * 100
+        formatted["coverage_pct"] = pd.to_numeric(formatted["coverage_pct"], errors="coerce") * 100
 
     column_order: List[str] = [sector_column, "released_companies", "total_companies", "coverage_pct"]
     for metric in earnings_metrics:
