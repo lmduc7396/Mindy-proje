@@ -62,8 +62,8 @@ def _compute_ticker_growth(
     current["qoq_growth"] = _growth(current["current_value"], current["prev_value"])
     current["yoy_growth"] = _growth(current["current_value"], current["yoy_value"])
 
-    current["qoq_rank"] = current["qoq_growth"].rank(ascending=False, method="average", pct=True)
-    current["yoy_rank"] = current["yoy_growth"].rank(ascending=False, method="average", pct=True)
+    current["qoq_rank"] = current["qoq_growth"].rank(ascending=True, method="average", pct=True)
+    current["yoy_rank"] = current["yoy_growth"].rank(ascending=True, method="average", pct=True)
     current["combined_score"] = np.nanmean(current[["qoq_rank", "yoy_rank"]].to_numpy(), axis=1)
 
     return current
