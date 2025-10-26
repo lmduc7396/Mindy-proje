@@ -134,7 +134,7 @@ def _prepare_rank_table(df: pd.DataFrame, top_n: int, ascending: bool, min_base:
         "NPATMI YoY %",
     ]
 
-    return table[display_columns]ß
+    return table[display_columns]
 
 
 def main() -> None:
