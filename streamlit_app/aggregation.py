@@ -51,15 +51,6 @@ def metric_keycodes() -> List[str]:
     return [key for _, key in METRIC_CONFIG]
 
 
-def _ensure_series(df: pd.DataFrame, column: str) -> pd.Series:
-    value = df.get(column)
-    if isinstance(value, pd.DataFrame):
-        return value.iloc[:, 0]
-    if isinstance(value, pd.Series):
-        return value
-    return pd.Series(np.nan, index=df.index, dtype=float)
-
-
 def _parse_quarter(period: str) -> tuple[int, int]:
     match = re.fullmatch(r"(\d{4})Q([1-4])", period)
     if not match:
@@ -205,40 +196,37 @@ def _compute_growth(
         return pd.DataFrame(columns=[sector_column] + [f"{col}_{suffix}" for col in metric_cols])
 
     current = current_df.set_index(sector_column)
-    comparison = comparison_df.set_index(sector_column) if not comparison_df.empty else None
+    current_numeric = current.apply(pd.to_numeric, errors="coerce")
 
-    growth = pd.DataFrame(index=current.index, columns=metric_cols, dtype=float)
-
-    if comparison is not None:
+    if comparison_df.empty:
+        comparison_numeric = pd.DataFrame(index=current_numeric.index, columns=metric_cols)
+    else:
+        comparison = comparison_df.set_index(sector_column)
         comparison = comparison.reindex(current.index)
+        comparison_numeric = comparison.apply(pd.to_numeric, errors="coerce")
 
-    for metric in metric_cols:
-        if metric in current.columns:
-            current_series = pd.to_numeric(_ensure_series(current, metric), errors="coerce")
-        else:
-            current_series = pd.Series(np.nan, index=current.index, dtype=float)
+    records: List[Dict[str, float | str]] = []
+    for sector_label, current_row in current_numeric.iterrows():
+        record: Dict[str, float | str] = {sector_column: sector_label}
+        comparison_row = comparison_numeric.loc[sector_label] if sector_label in comparison_numeric.index else pd.Series(dtype=float)
 
-        if comparison is None:
-            growth[metric] = np.nan
-            continue
+        for metric in metric_cols:
+            current_value = current_row.get(metric)
+            comparison_value = comparison_row.get(metric) if not comparison_row.empty else np.nan
 
-        if metric in comparison.columns:
-            comparison_series = pd.to_numeric(_ensure_series(comparison, metric), errors="coerce")
-        else:
-            comparison_series = pd.Series(np.nan, index=current.index, dtype=float)
+            if isinstance(current_value, pd.Series):
+                current_value = current_value.iloc[0]
+            if isinstance(comparison_value, pd.Series):
+                comparison_value = comparison_value.iloc[0]
 
-        current_values = current_series.to_numpy(dtype=float)
-        comparison_values = comparison_series.to_numpy(dtype=float)
-        diff_values = current_values - comparison_values
-        mask = ~np.isnan(comparison_values) & (comparison_values != 0)
-        result = np.full_like(diff_values, np.nan, dtype=float)
-        with np.errstate(divide="ignore", invalid="ignore"):
-            result[mask] = diff_values[mask] / comparison_values[mask]
-        growth[metric] = result
+            if comparison_value is None or pd.isna(comparison_value) or comparison_value == 0:
+                record[f"{metric}_{suffix}"] = np.nan
+            else:
+                record[f"{metric}_{suffix}"] = (current_value - comparison_value) / comparison_value
 
-    growth = growth.replace([np.inf, -np.inf], np.nan)
-    growth = growth.rename(columns={col: f"{col}_{suffix}" for col in metric_cols})
-    return growth.reset_index()
+        records.append(record)
+
+    return pd.DataFrame(records)
 
 
 def summarise_by_sector(
