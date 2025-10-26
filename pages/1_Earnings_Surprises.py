@@ -85,20 +85,53 @@ def _prepare_rank_table(df: pd.DataFrame, top_n: int, ascending: bool, min_base:
         ascending=[ascending, False, False],
     ).head(top_n)
 
-    filtered["Metric (bn VND)"] = filtered["current_value"] / 1e9
-    filtered["QoQ Growth %"] = filtered["qoq_growth"] * 100
-    filtered["YoY Growth %"] = filtered["yoy_growth"] * 100
+    filtered["Revenue (bn VND)"] = np.where(
+        filtered["Metric"] == "Revenue",
+        filtered["current_value"] / 1e9,
+        np.nan,
+    )
+    filtered["Revenue QoQ %"] = np.where(
+        filtered["Metric"] == "Revenue",
+        filtered["qoq_growth"] * 100,
+        np.nan,
+    )
+    filtered["Revenue YoY %"] = np.where(
+        filtered["Metric"] == "Revenue",
+        filtered["yoy_growth"] * 100,
+        np.nan,
+    )
+    filtered["NPATMI (bn VND)"] = np.where(
+        filtered["Metric"] == "NPATMI",
+        filtered["current_value"] / 1e9,
+        np.nan,
+    )
+    filtered["NPATMI QoQ %"] = np.where(
+        filtered["Metric"] == "NPATMI",
+        filtered["qoq_growth"] * 100,
+        np.nan,
+    )
+    filtered["NPATMI YoY %"] = np.where(
+        filtered["Metric"] == "NPATMI",
+        filtered["yoy_growth"] * 100,
+        np.nan,
+    )
 
-    display_columns = [
-        "Metric",
-        "Ticker",
-        "Sector",
-        "L2",
-        "Metric (bn VND)",
-        "QoQ Growth %",
-        "YoY Growth %",
-    ]
-    return filtered[display_columns]
+    aggregated = (
+        filtered.groupby(["Ticker", "Sector", "L2"], dropna=False)[
+            [
+                "Revenue (bn VND)",
+                "Revenue QoQ %",
+                "Revenue YoY %",
+                "NPATMI (bn VND)",
+                "NPATMI QoQ %",
+                "NPATMI YoY %",
+            ]
+        ]
+        .sum(min_count=1)
+        .reset_index()
+    )
+
+    return aggregated
 
 
 def main() -> None:
@@ -155,9 +188,12 @@ def main() -> None:
             st.write("No tickers meet the filters.")
             return
         column_config = {
-            "Metric (bn VND)": st.column_config.NumberColumn("Metric (bn VND)", format="%.1f"),
-            "QoQ Growth %": st.column_config.NumberColumn("QoQ Growth", format="%.1f%%"),
-            "YoY Growth %": st.column_config.NumberColumn("YoY Growth", format="%.1f%%"),
+            "Revenue (bn VND)": st.column_config.NumberColumn("Revenue (bn VND)", format="%.1f"),
+            "Revenue QoQ %": st.column_config.NumberColumn("Revenue QoQ", format="%.1f%%"),
+            "Revenue YoY %": st.column_config.NumberColumn("Revenue YoY", format="%.1f%%"),
+            "NPATMI (bn VND)": st.column_config.NumberColumn("NPATMI (bn VND)", format="%.1f"),
+            "NPATMI QoQ %": st.column_config.NumberColumn("NPATMI QoQ", format="%.1f%%"),
+            "NPATMI YoY %": st.column_config.NumberColumn("NPATMI YoY", format="%.1f%%"),
         }
         st.dataframe(
             df,
@@ -194,11 +230,8 @@ def main() -> None:
     best = _prepare_rank_table(combined_growth, top_n, ascending=False, min_base=min_base_value)
     worst = _prepare_rank_table(combined_growth, top_n, ascending=True, min_base=min_base_value)
 
-    cols = st.columns(2)
-    with cols[0]:
-        _display_table("Positive Surprises", best)
-    with cols[1]:
-        _display_table("Negative Surprises", worst)
+    _display_table("Positive Surprises", best)
+    _display_table("Negative Surprises", worst)
 
     st.caption(
         "Combined ranking averages percentile ranks for QoQ and YoY growth, then orders tickers by score and earnings base."
