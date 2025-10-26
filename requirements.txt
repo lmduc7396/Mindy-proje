@@ -3,3 +3,4 @@ pandas>=2.1
 numpy>=1.26
 sqlalchemy>=2.0
 pyodbc>=4.0
+pymssql>=2.2

@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import logging
 from functools import lru_cache
-from typing import Iterable, List, Optional, Sequence
+from typing import Dict, Iterable, List, Optional, Sequence
 
 import pandas as pd
 from sqlalchemy import bindparam, create_engine, text
@@ -16,7 +16,7 @@ try:  # Streamlit may not be installed in non-app contexts
 except ModuleNotFoundError:  # pragma: no cover - optional dependency
     st = None  # type: ignore
 
-from urllib.parse import quote_plus
+from urllib.parse import quote, quote_plus
 
 
 class MissingDatabaseURL(RuntimeError):
@@ -55,12 +55,68 @@ def _enumerate_secret_values() -> List[str]:
 
 
 def _augment_with_driver_fallbacks(raw_value: str) -> List[str]:
-    options = [raw_value]
+    options: List[str] = []
 
-    if "{ODBC Driver 18 for SQL Server}" in raw_value and "{ODBC Driver 17 for SQL Server}" not in raw_value:
-        options.append(raw_value.replace("{ODBC Driver 18 for SQL Server}", "{ODBC Driver 17 for SQL Server}"))
+    if "{ODBC Driver 18 for SQL Server}" in raw_value:
+        fallback = raw_value.replace("{ODBC Driver 18 for SQL Server}", "{ODBC Driver 17 for SQL Server}")
+        if fallback != raw_value:
+            options.append(fallback)
+
+    options.append(raw_value)
 
     return options
+
+
+def _parse_odbc_connection_string(raw_value: str) -> Dict[str, str]:
+    parts = [segment for segment in raw_value.strip().split(";") if segment]
+    values: Dict[str, str] = {}
+    for part in parts:
+        if "=" not in part:
+            continue
+        key, value = part.split("=", 1)
+        values[key.strip().upper()] = value.strip()
+    return values
+
+
+def _pymssql_url_from_odbc(raw_value: str) -> Optional[str]:
+    values = _parse_odbc_connection_string(raw_value)
+    user = values.get("UID")
+    password = values.get("PWD")
+    database = values.get("DATABASE")
+    server = values.get("SERVER")
+
+    if not all([user, password, database, server]):
+        return None
+
+    server = server.strip()
+    if server.lower().startswith("tcp:"):
+        server = server[4:]
+
+    host = server
+    port = "1433"
+    if "," in server:
+        host, port = server.split(",", 1)
+        host = host.strip()
+        port = port.strip()
+
+    query_params = []
+    encrypt = values.get("ENCRYPT")
+    if encrypt:
+        query_params.append(f"encrypt={encrypt.lower()}")
+
+    trust_cert = values.get("TRUSTSERVERCERTIFICATE")
+    if trust_cert:
+        query_params.append(f"trustservercertificate={trust_cert.lower()}")
+
+    timeout = values.get("CONNECTION TIMEOUT")
+    if timeout:
+        query_params.append(f"timeout={timeout}")
+
+    query_string = f"?{'&'.join(query_params)}" if query_params else ""
+
+    return (
+        f"mssql+pymssql://{quote(user)}:{quote_plus(password)}@{host}:{port}/{database}{query_string}"
+    )
 
 
 def _get_candidate_database_urls() -> List[str]:
@@ -76,6 +132,11 @@ def _get_candidate_database_urls() -> List[str]:
         raw = raw.strip()
         if not raw:
             continue
+
+        pymssql_url = _pymssql_url_from_odbc(raw)
+        if pymssql_url and pymssql_url not in urls:
+            urls.append(pymssql_url)
+
         for option in _augment_with_driver_fallbacks(raw):
             url = _standardise_sqlalchemy_url(option)
             if url not in urls:
