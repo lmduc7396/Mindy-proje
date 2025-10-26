@@ -243,6 +243,12 @@ def summarise_by_sector(
     sector_column = level
     metric_cols = metric_labels()
 
+    def _sum_metrics(frame: pd.DataFrame) -> pd.Series:
+        if frame.empty:
+            return pd.Series({metric: np.nan for metric in metric_cols})
+        summed = frame[metric_cols].sum(axis=0, min_count=1)
+        return summed.reindex(metric_cols)
+
     pivoted = _pivot_financials(raw_financials)
     current_period_df = pivoted[pivoted["PERIOD"] == period]
     if current_period_df.empty:
@@ -307,6 +313,38 @@ def summarise_by_sector(
 
     coverage = output[["released_companies", "total_companies"]].copy()
     output["coverage_pct"] = coverage["released_companies"].astype(float) / coverage["total_companies"].replace({0: np.nan})
+
+    totals_metrics = _sum_metrics(current_summary)
+    totals_previous = _sum_metrics(previous_summary)
+    totals_yoy = _sum_metrics(yoy_summary)
+
+    total_released = int(len(released_tickers))
+    total_universe = int(sector_map["Ticker"].nunique()) if not sector_map.empty else 0
+
+    total_row: Dict[str, float | str] = {sector_column: "Total"}
+    for metric in metric_cols:
+        current_value = totals_metrics.get(metric)
+        total_row[metric] = current_value
+
+        prev_value = totals_previous.get(metric)
+        if pd.notna(current_value) and pd.notna(prev_value) and prev_value != 0:
+            total_row[f"{metric}_QoQ"] = (current_value - prev_value) / prev_value
+        else:
+            total_row[f"{metric}_QoQ"] = np.nan
+
+        yoy_value = totals_yoy.get(metric)
+        if pd.notna(current_value) and pd.notna(yoy_value) and yoy_value != 0:
+            total_row[f"{metric}_YoY"] = (current_value - yoy_value) / yoy_value
+        else:
+            total_row[f"{metric}_YoY"] = np.nan
+
+    total_row["released_companies"] = total_released
+    total_row["total_companies"] = total_universe
+    total_row["coverage_pct"] = (total_released / total_universe) if total_universe else np.nan
+
+    total_df = pd.DataFrame([total_row])
+    total_df = total_df.reindex(columns=output.columns)
+    output = pd.concat([total_df, output], ignore_index=True)
 
     released_count = int(len(released_tickers))
     total_count = int(sector_map["Ticker"].nunique()) if not sector_map.empty else 0
