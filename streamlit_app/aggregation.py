@@ -198,11 +198,20 @@ def _compute_growth(
     current = current_df.set_index(sector_column)
     comparison = comparison_df.set_index(sector_column) if not comparison_df.empty else None
 
-    if comparison is None:
-        growth = pd.DataFrame(index=current.index, columns=metric_cols, dtype=float)
-    else:
+    growth = pd.DataFrame(index=current.index, columns=metric_cols, dtype=float)
+
+    if comparison is not None:
         comparison = comparison.reindex(current.index)
-        growth = (current - comparison) / comparison
+
+    for metric in metric_cols:
+        current_series = pd.to_numeric(current.get(metric), errors="coerce")
+        if comparison is None:
+            growth[metric] = np.nan
+            continue
+
+        comparison_series = pd.to_numeric(comparison.get(metric), errors="coerce")
+        with np.errstate(divide="ignore", invalid="ignore"):
+            growth[metric] = (current_series - comparison_series) / comparison_series
 
     growth = growth.replace([np.inf, -np.inf], np.nan)
     growth = growth.rename(columns={col: f"{col}_{suffix}" for col in metric_cols})
