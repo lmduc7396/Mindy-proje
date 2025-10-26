@@ -204,6 +204,7 @@ def _compute_growth(
         comparison = comparison_df.set_index(sector_column)
         comparison = comparison.reindex(current.index)
         comparison_numeric = comparison.apply(pd.to_numeric, errors="coerce")
+        comparison_numeric = comparison_numeric.reindex(current_numeric.index)
 
     records: List[Dict[str, float | str]] = []
     for sector_label, current_row in current_numeric.iterrows():
