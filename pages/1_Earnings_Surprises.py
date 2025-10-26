@@ -24,6 +24,19 @@ st.caption(
     "Growth calculations use only the companies with data in the selected period and comparison." 
 )
 
+st.markdown(
+    """
+    <style>
+    .main .block-container {
+        max-width: 1400px;
+        padding-left: 2rem;
+        padding-right: 2rem;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
 
 def _compute_ticker_growth(
     pivoted: pd.DataFrame,
