@@ -51,6 +51,15 @@ def metric_keycodes() -> List[str]:
     return [key for _, key in METRIC_CONFIG]
 
 
+def _ensure_series(df: pd.DataFrame, column: str) -> pd.Series:
+    value = df.get(column)
+    if isinstance(value, pd.DataFrame):
+        return value.iloc[:, 0]
+    if isinstance(value, pd.Series):
+        return value
+    return pd.Series(np.nan, index=df.index, dtype=float)
+
+
 def _parse_quarter(period: str) -> tuple[int, int]:
     match = re.fullmatch(r"(\d{4})Q([1-4])", period)
     if not match:
@@ -205,7 +214,7 @@ def _compute_growth(
 
     for metric in metric_cols:
         if metric in current.columns:
-            current_series = pd.to_numeric(current[metric], errors="coerce")
+            current_series = pd.to_numeric(_ensure_series(current, metric), errors="coerce")
         else:
             current_series = pd.Series(np.nan, index=current.index, dtype=float)
 
@@ -214,7 +223,7 @@ def _compute_growth(
             continue
 
         if metric in comparison.columns:
-            comparison_series = pd.to_numeric(comparison[metric], errors="coerce")
+            comparison_series = pd.to_numeric(_ensure_series(comparison, metric), errors="coerce")
         else:
             comparison_series = pd.Series(np.nan, index=current.index, dtype=float)
 
