@@ -218,8 +218,9 @@ def _compute_growth(
         else:
             comparison_series = pd.Series(np.nan, index=current.index, dtype=float)
 
-        diff_values = (current_series - comparison_series).to_numpy(dtype=float)
+        current_values = current_series.to_numpy(dtype=float)
         comparison_values = comparison_series.to_numpy(dtype=float)
+        diff_values = current_values - comparison_values
         mask = ~np.isnan(comparison_values) & (comparison_values != 0)
         result = np.full_like(diff_values, np.nan, dtype=float)
         with np.errstate(divide="ignore", invalid="ignore"):
