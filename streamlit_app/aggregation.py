@@ -12,9 +12,6 @@ import pandas as pd
 
 METRIC_CONFIG = (
     ("Revenue", "Net_Revenue"),
-    ("Gross Profit", "Gross_Profit"),
-    ("EBITDA", "EBITDA"),
-    ("EBIT", "EBIT"),
     ("NPATMI", "NPATMI"),
 )
 
